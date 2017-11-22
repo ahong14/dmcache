@@ -88,14 +88,18 @@ class cache_line{
     void reset_dirty_bit(); //reset dirty bit
     void set_line_number(int line_no); //set line number
     int get_line_number();
-    void set_data(int offset1, int offset2, char temp);
+    void set_data(int offset1, string temp);
     void print_data(int offset);
+    void set_tag(int tag_no);
+    int get_tag();
+    string get_data(int offset);
 
    
     private:
     bool dirty_bit; //dirty bit
     int line_number;//line number of cache line
-    char data[8][8]; // data bytes within cache line 
+    string data[8]; // data bytes within cache line 
+    int tag;
     
 };
 
@@ -105,12 +109,11 @@ cache_line::cache_line(){
     //initialize values
     dirty_bit = false;
     line_number=-1;
+    tag=-1;
     
     //set all bits within data bytes to 0
     for (int i=0; i<8; i++){
-        for(int j=0; j<8; j++){
-            data[i][j]=0;
-        }
+        data[i]="0";
     }
     
     
@@ -139,8 +142,8 @@ int cache_line::get_line_number(){
     return line_number;
 }
 
-void cache_line::set_data(int offset1, int offset2, char temp){
-    data[offset1][offset2] = temp;
+void cache_line::set_data(int offset1, string temp){
+    data[offset1] = temp;
     
 }
 
@@ -148,12 +151,35 @@ void cache_line::print_data(int offset){
     cout<<data[offset]<<endl;
 }
 
+void cache_line::set_tag(int tag_no){
+    tag=tag_no;
+    
+}
 
+int cache_line::get_tag(){
+    return tag;
+}
+
+string cache_line::get_data(int offset){
+    return data[offset];
+}
+//end of class functions 
 
 int main(int argc, char**argv){
     
     //initialize 32 cache line objects 
     cache_line cache[32];
+    
+    //RAM
+    int ram_size=65536;
+    string RAM[65536][8];
+    
+     //initialize RAM
+    for (int i=0; i<65536; i++){
+        for(int j=0; j<8; j++){
+            RAM[i][j]="0";
+        }
+    }
     
     for (int i=0; i<32;i++){
         //set cache line number 
@@ -179,6 +205,7 @@ int main(int argc, char**argv){
         string current_line;
         string current_bits;
         string binary_pattern;
+        string data_pattern;
         
         char address_hex[4];
         char address_binary[16];
@@ -195,6 +222,7 @@ int main(int argc, char**argv){
         
         unsigned int offset;
         unsigned int line_no;
+        int tag_no;
         
         
         //first, read entire line from file
@@ -216,6 +244,8 @@ int main(int argc, char**argv){
         }
         //end of parsing line
         
+      
+        
 
         //convert address to binary 
         
@@ -234,11 +264,16 @@ int main(int argc, char**argv){
        current_bits="";
        
        
-       //convert data to binary
-       for (int i=0; i<2; i++){
-           current_bits=hextobinary(data_hex[i]);
-           binary_pattern += current_bits;
-       }
+    //   //convert data to binary
+    //   for (int i=0; i<2; i++){
+    //       current_bits=hextobinary(data_hex[i]);
+    //       binary_pattern += current_bits;
+    //   }
+    
+       data_pattern += data_hex[0];
+       data_pattern += data_hex[1];
+    
+       
        
        //store binary pattern into data
        
@@ -277,47 +312,95 @@ int main(int argc, char**argv){
        line_no = bintodec(line_pattern);
        
        
+       //get tag
+       string tag_pattern;
+       tag_pattern += address_binary[0];
+       tag_pattern += address_binary[1];
+       tag_pattern += address_binary[2];
+       tag_pattern += address_binary[3];
+       tag_pattern += address_binary[4];
+       tag_pattern += address_binary[5];
+       tag_pattern += address_binary[6];
+       tag_pattern += address_binary[7];
        
+       
+       tag_no = bintodec(tag_pattern);
        
        //done converting to bits
-       
        
        //write operation
        if(operation=="FF"){
            
            for (int i=0; i<32; i++){
-               //found corresponding cache line 
-               if (cache[i].get_line_number() == line_no){
+               //cache hits
+               //case where tag has not been set for in cache line
+               if (cache[i].get_line_number() == line_no && cache[i].get_tag()==-1){
                    //write data to offset of memory block
-                   for(int j=0; j<8; j++){
-                       cache[i].set_data(offset,j,data_binary[j]);
-                       //cache[i].data[offset][j]=data_binary[j];
-                   }
-                   cache[i].set_dirty_bit();
-                   cout<<"testing to see if data was written correctly"<<endl;
+                   cache[i].set_data(offset,data_pattern);//set data
+                   cache[i].set_dirty_bit(); //set dirty bit
+                   cache[i].set_tag(tag_no);//set tag number 
+                   
+                   cout<<"data that was written"<<endl;
                    cache[i].print_data(offset);
-                 //  cout<<cache[i].data[offset]<<endl;
                    break;
                }
-           }
+               //case where tag is set, checking line number and matching tag
+               else if(cache[i].get_line_number() == line_no && cache[i].get_tag()==tag_no){
+                    //write data to offset of memory block
+                   cache[i].set_data(offset,data_pattern);//set data
+                   cache[i].set_dirty_bit(); //set dirty bit
+                   
+                   cout<<"data that was written"<<endl;
+                   cache[i].print_data(offset);
+                   break;
+                   
+               }
+              
+               //cache miss, need to evict cache line to RAM, bring in correct data based on tag
+               else if(cache[i].get_line_number() == line_no && cache[i].get_tag()!= tag_no){
+                   cout<<"cache miss reached"<<endl;
+                   cout<<"previous tag"<<endl;
+                   cout<<cache[i].get_tag()<<endl;
+                   
+                   
+                   //evict cache line into RAM
+                   //save data of this tag into RAM
+                   for (int j=0; j<8; j++){
+                       RAM[cache[i].get_tag()][i]=cache[i].get_data(i);
+                   }
+                   
+                   //set this line to target tag
+                   cache[i].set_tag(tag_no);
+                   
+                   //take in data from RAM and place into cache line
+                   for (int j=0; j<8; j++){
+                       cache[j].set_data(j, RAM[tag_no][j]);
+                   }
+                   
+                   //set appropriate data for target tag
+                   cache[i].set_data(offset, data_pattern);
+                   cache[i].set_dirty_bit(); //set dirty bit
+                   
+                   
+                   cout<<"new tag"<<endl;
+                   cout<<cache[i].get_tag()<<endl;
+                   cout<<"data that was written"<<endl;
+                   cache[i].print_data(offset);
+                   break;
+               }
+               
+               
+           } //end of for loop
            
        }
        
-       break;
        
-       
-       
-       
-    //   //read operation
-    //   else if(operation=="00"){
-           
-    //   }
-       
-
-        
-        // for (int i=0; i<16; i++){
-        //     address_binary[i]
-        // }
+      //read operation
+      else if(operation=="00"){
+           cout<<"read reached"<<endl;
+           break;
+      }
+      
         
     }
     //end of while loop
